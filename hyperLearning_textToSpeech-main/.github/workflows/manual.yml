@@ -1,0 +1,72 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CICD text2speech
+
+# Controls when the action will run.
+on:
+  # Triggers the workflow on push or pull request events but only for the main branch
+  # push:
+  #   branches: [ main ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+
+      - name: Login Docker Hub
+        id: acr
+        uses: azure/docker-login@v1
+        with:
+          login-server: vtcai.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v1
+        id: buildx
+
+      - name: Cache Docker Image Layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      - name: 'Build and Push docker image to ACR'
+        uses: azure/docker-login@v1
+        with:
+          login-server: vtcai.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+      #
+      - run: |
+          # docker build . -t vtcai.azurecr.io/text2speech:${{ github.sha }}
+          # docker push vtcai.azurecr.io/text2speech:${{ github.sha }}
+          docker build . -t vtcai.azurecr.io/text2speech:latest
+          docker push vtcai.azurecr.io/text2speech:latest
+      - name: 'Deploy to vm'
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          port: ${{ secrets.VM_PORT_SSH }}
+          password: ${{ secrets.VM_PASSWORD }}
+          script: |
+            docker stop text2speech
+            docker rm -v text2speech
+            docker image rm vtcai.azurecr.io/text2speech:latest
+            docker pull vtcai.azurecr.io/text2speech:latest
+            docker run -it -d -p 9999:80  --name text2speech --env BUILD_ENVIRONMENT=qc vtcai.azurecr.io/text2speech:latest
+      - name: Verify
+        run: echo ${{ steps.buildx.digest }}
